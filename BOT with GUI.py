@@ -23,7 +23,7 @@ st.set_page_config(page_title="Live Alert Bot", layout="wide")
 st.title("📈 Real-time Strategy 1 Alert Bot Dashboard")
 
 # ================================
-# ⏰ Market Hours Filter (optional, only for NSE)
+# ⏰ Market Hours Filter
 # ================================
 def is_market_open(symbol: str):
     if "NIFTY" in symbol:
@@ -36,16 +36,23 @@ def is_market_open(symbol: str):
 # ================================
 def fetch_data(symbol: str) -> pd.DataFrame:
     try:
-        df = yf.download(symbol, period=LOOKBACK, interval=INTERVAL)
+        df = yf.download(symbol, period=LOOKBACK, interval=INTERVAL, progress=False)
+        if isinstance(df, tuple):
+            df = df[0]
         if df is None or df.empty:
             st.warning(f"⚠️ No data for {symbol}")
             return pd.DataFrame()
         df.columns = [col.lower() for col in df.columns]
         df.reset_index(inplace=True)
-        df.rename(columns={"datetime": "time"}, inplace=True)
+        if "datetime" in df.columns:
+            df.rename(columns={"datetime": "time"}, inplace=True)
+        elif "date" in df.columns:
+            df.rename(columns={"date": "time"}, inplace=True)
+        else:
+            df.rename(columns={"index": "time"}, inplace=True)
         return df[["time", "open", "high", "low", "close", "volume"]]
     except Exception as e:
-        st.error(f"Error fetching data for {symbol}: {e}")
+        st.error(f"❌ Error fetching data for {symbol}: {e}")
         return pd.DataFrame()
 
 # ================================
