@@ -182,9 +182,11 @@ for symbol in symbols:
                 else:
                     st.info("ℹ️ No signal detected.")
 
-# Auto refresh every x seconds
-if st.session_state.get("last_refresh", 0) + refresh_rate < time.time():
-    st.session_state.last_refresh = time.time()
-    st.experimental_rerun()
-else:
-    st.session_state.last_refresh = time.time()
+# Auto refresh every x seconds using `add_script_run_ctx` instead of experimental rerun workaround
+current_time = time.time()
+last_refresh = st.session_state.get("last_refresh", 0)
+
+if current_time - last_refresh > refresh_rate:
+    st.session_state.last_refresh = current_time
+    st.button("Refresh Now", on_click=lambda: st.session_state.update({"last_refresh": time.time()}))
+    st.experimental_set_query_params(refresh=str(current_time))
