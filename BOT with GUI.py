@@ -1,18 +1,16 @@
 import streamlit as st
-import pandas as pd
 import yfinance as yf
+import pandas as pd
 import datetime
 import time
-import matplotlib.pyplot as plt
-import plotly.graph_objects as go
 import requests
-import os
+import plotly.graph_objects as go
 
-# --------------------------- Telegram Configuration ---------------------------
+# --- TELEGRAM CONFIG ---
 TELEGRAM_BOT_TOKEN = "7118083654:AAHnZ9AzA18kRp8FyHcdn8WjC98lrZpOEc8"
 TELEGRAM_CHAT_ID = "1714318497"
 
-# --------------------------- Symbol Mapping ---------------------------
+# --- SYMBOL MAPPING ---
 SYMBOL_MAP = {
     "BTCUSDT": "BTC-USD",
     "ETHUSDT": "ETH-USD",
@@ -20,95 +18,83 @@ SYMBOL_MAP = {
     "BANKNIFTY": "^NSEBANK"
 }
 
-# --------------------------- Strategy Logic (Bullish Engulfing) ---------------------------
-def detect_bullish_engulfing(df):
-    df['signal'] = ""
-    for i in range(1, len(df)):
-        prev = df.iloc[i-1]
-        curr = df.iloc[i]
-        if prev['close'] < prev['open'] and curr['close'] > curr['open']:
-            if curr['open'] < prev['close'] and curr['close'] > prev['open']:
-                df.at[df.index[i], 'signal'] = 'Bullish Engulfing'
-    return df
+# --- Streamlit UI ---
+st.set_page_config(page_title="Trading Alert Bot", layout="wide")
+st.title("📊 Real-time Trading Strategy Alerts")
 
-# --------------------------- Fetch Data ---------------------------
-def fetch_data(symbol, interval="5m", period="1d"):
+# User controls
+symbols = st.multiselect("Select Symbols", list(SYMBOL_MAP.keys()), default=list(SYMBOL_MAP.keys()), key="symbol_select")
+alert_enabled = st.checkbox("🔔 Enable Alerts", value=True, key="alert_toggle")
+refresh_interval = st.slider("⏱️ Refresh Interval (seconds)", 30, 300, 60)
+
+# --- Strategy 1: Bullish Engulfing Pattern ---
+def strategy_1(df):
+    if len(df) < 2:
+        return False
+    prev = df.iloc[-2]
+    curr = df.iloc[-1]
+    return prev['Close'] < prev['Open'] and curr['Close'] > curr['Open'] and curr['Close'] > prev['Open'] and curr['Open'] < prev['Close']
+
+# --- Fetch data from yfinance ---
+def fetch_data(symbol):
     try:
-        df = yf.download(tickers=symbol, interval=interval, period=period)
-        df = df.reset_index()
-        df.columns = [col.lower() for col in df.columns]
-        df = df.rename(columns={'datetime': 'time'})
-        df = df[['time', 'open', 'high', 'low', 'close', 'volume']]
+        ticker = SYMBOL_MAP[symbol]
+        df = yf.download(ticker, interval='5m', period='1d')
+        df.reset_index(inplace=True)
+        df.rename(columns=str.capitalize, inplace=True)
+        df = df[['Datetime', 'Open', 'High', 'Low', 'Close', 'Volume']]
+        df.rename(columns={"Datetime": "Time"}, inplace=True)
         return df
     except Exception as e:
         st.error(f"❌ Error fetching data for {symbol}: {e}")
         return pd.DataFrame()
 
-# --------------------------- Plot and Save Chart ---------------------------
-def plot_chart(df, symbol):
-    fig = go.Figure(data=[go.Candlestick(
-        x=df['time'],
-        open=df['open'],
-        high=df['high'],
-        low=df['low'],
-        close=df['close'],
-        increasing_line_color='green',
-        decreasing_line_color='red'
-    )])
-    fig.update_layout(title=f"{symbol} - Last 20 Candles", xaxis_title="Time", yaxis_title="Price")
-    file_name = f"{symbol}_chart.png"
-    fig.write_image(file_name)
-    return file_name
-
-# --------------------------- Send Alert with Chart ---------------------------
-def send_telegram_alert(symbol, signal, chart_path):
+# --- Send Telegram alert ---
+def send_telegram_alert(symbol, message):
     try:
-        message = f"🚨 *{signal}* Detected on *{symbol}*\nTime: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
-        with open(chart_path, 'rb') as photo:
-            payload = {
-                "chat_id": TELEGRAM_CHAT_ID,
-                "caption": message,
-                "parse_mode": "Markdown"
-            }
-            files = {"photo": photo}
-            requests.post(url, data=payload, files=files)
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": f"📢 [{symbol}] Alert:\n{message}"}
+        requests.post(url, data=payload)
     except Exception as e:
-        st.error(f"❌ Failed to send Telegram alert for {symbol}: {e}")
+        st.error(f"❌ Error sending Telegram message: {e}")
 
-# --------------------------- Strategy Runner ---------------------------
-def run_strategy(symbols, alerts_enabled):
+# --- Plot Chart ---
+def plot_chart(df, symbol):
+    fig = go.Figure()
+    fig.add_trace(go.Candlestick(
+        x=df["Time"],
+        open=df["Open"],
+        high=df["High"],
+        low=df["Low"],
+        close=df["Close"],
+        name=symbol
+    ))
+    fig.update_layout(title=f"{symbol} - 5m Candlestick", xaxis_rangeslider_visible=False)
+    return fig
+
+# --- Main Monitoring Loop ---
+def monitor():
     for symbol in symbols:
-        yf_symbol = SYMBOL_MAP[symbol]
-        df = fetch_data(yf_symbol)
+        df = fetch_data(symbol)
         if df.empty:
             continue
-        df = detect_bullish_engulfing(df)
-        latest = df.iloc[-1]
-        if latest['signal'] == 'Bullish Engulfing':
-            st.success(f"✅ Bullish Engulfing on {symbol}")
-            chart_path = plot_chart(df[-20:], symbol)
-            if alerts_enabled:
-                send_telegram_alert(symbol, "Bullish Engulfing", chart_path)
-        else:
-            st.info(f"ℹ️ No Signal on {symbol}")
 
-# --------------------------- Streamlit UI ---------------------------
-st.set_page_config(page_title="Trading Strategy Alert Dashboard", layout="wide")
-st.title("📈 Real-time Trading Strategy Alerts")
-st.markdown("Monitor BTC, ETH, Nifty, and BankNifty with Strategy 1 (Bullish Engulfing)")
+        st.subheader(f"📈 {symbol}")
+        st.plotly_chart(plot_chart(df, symbol), use_container_width=True)
 
-symbols = st.multiselect("Select Symbols", list(SYMBOL_MAP.keys()), default=list(SYMBOL_MAP.keys()), key="symbol_selector")
-alerts_enabled = st.toggle("🔔 Alerts ON/OFF", value=True, key="alert_toggle")
+        if alert_enabled:
+            try:
+                if strategy_1(df):
+                    send_telegram_alert(symbol, "✅ Strategy 1 triggered: Bullish Engulfing Pattern")
+                    st.success(f"{symbol}: Strategy 1 Triggered ✅")
+                else:
+                    st.info(f"{symbol}: No alert 🚫")
+            except Exception as e:
+                st.error(f"❌ Error evaluating strategy for {symbol}: {e}")
 
-if st.button("Run Strategy Check Now", key="run_button"):
-    run_strategy(symbols, alerts_enabled)
-
-# Optional Auto Refresh
-st_autorefresh = st.empty()
-st_autorefresh.button("🔁 Auto Refresh (every 1 min)", key="auto_refresh_button")
-
-# Run every 60 seconds if enabled (uncomment below for auto mode)
-# while True:
-#     run_strategy(symbols, alerts_enabled)
-#     time.sleep(60)
+# --- Streamlit Auto-refresh ---
+placeholder = st.empty()
+while True:
+    with placeholder.container():
+        monitor()
+    time.sleep(refresh_interval)
