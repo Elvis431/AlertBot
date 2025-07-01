@@ -4,7 +4,6 @@ import streamlit as st
 import time
 import plotly.graph_objects as go
 import requests
-import tempfile
 import os
 
 # Telegram configuration
@@ -124,7 +123,8 @@ def _valid_strategy1_pair(c1: pd.Series, c2: pd.Series) -> bool:
             return False
         upper = high - max(close, open_)
         lower = min(close, open_) - low
-        return abs(upper - body) / body < 0.2 and abs(lower - body) / body < 0.2
+
+        return upper < body * 1.5 and lower < body * 1.5
 
     return _balanced(c1) and _balanced(c2)
 
@@ -135,23 +135,13 @@ def detect_strategy1(df: pd.DataFrame):
             matches.append((i, str(df.iloc[i]["time"]), str(df.iloc[i + 1]["time"])))
     return matches
 
-# Send Telegram alert with optional chart
-
+# Send Telegram alert with text only (no image)
 def send_telegram_alert(message, chart_path=None):
     if not enable_alerts:
         return
     try:
-        if chart_path and os.path.exists(chart_path):
-            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
-            with open(chart_path, 'rb') as photo:
-                requests.post(url, data={
-                    "chat_id": TELEGRAM_CHAT_ID,
-                    "caption": message
-                }, files={"photo": photo})
-            os.remove(chart_path)
-        else:
-            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-            requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": message})
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": message})
     except Exception as e:
         st.error(f"❌ Telegram Error: {e}")
 
@@ -181,11 +171,6 @@ def plot_chart(df, symbol, strategy_matches):
     fig.update_layout(title=f"{symbol} - 5m Candle Chart", xaxis_title="Time", yaxis_title="Price")
     st.plotly_chart(fig, use_container_width=True)
 
-    if strategy_matches:
-        temp_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-        fig.write_image(temp_file.name, format="png", engine="kaleido")
-        return temp_file.name
-
     return None
 
 # Run bot loop per refresh
@@ -199,15 +184,17 @@ for symbol in symbols:
             col1, col2 = st.columns([3, 2])
 
             with col1:
-                chart_path = plot_chart(df, symbol, matches)
+                plot_chart(df, symbol, matches)
 
             with col2:
-                st.write(df.tail(5))
+                safe_df = df.copy()
+                safe_df['time'] = safe_df['time'].astype(str)
+                st.write(safe_df.tail(5))
 
                 if matches:
                     st.success(f"✅ Strategy 1 Triggered at {matches[-1][2]}")
                     send_telegram_alert(
-                        f"✅ Strategy 1 triggered for {symbol} at {matches[-1][2]}", chart_path
+                        f"✅ Strategy 1 triggered for {symbol} at {matches[-1][2]}"
                     )
                 else:
                     st.info("ℹ️ No signal detected.")
