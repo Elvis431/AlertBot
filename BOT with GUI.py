@@ -54,7 +54,6 @@ def fetch_data(symbol):
     try:
         df = yf.download(symbol, interval="5m", period="1d", progress=False)
 
-        # Ensure returned object is a DataFrame
         if not isinstance(df, pd.DataFrame) or df.empty:
             raise ValueError("No data or unexpected format")
 
@@ -68,6 +67,20 @@ def fetch_data(symbol):
         else:
             df.rename(columns={df.columns[0]: "time"}, inplace=True)
 
+        rename_map = {
+            'open': 'open',
+            'high': 'high',
+            'low': 'low',
+            'close': 'close'
+        }
+
+        possible_cols = list(df.columns)
+        for col in rename_map:
+            if col not in df.columns:
+                for alt_col in possible_cols:
+                    if col in alt_col:
+                        df.rename(columns={alt_col: col}, inplace=True)
+
         required_cols = ['open', 'high', 'low', 'close']
         for col in required_cols:
             if col not in df.columns:
@@ -78,9 +91,7 @@ def fetch_data(symbol):
         st.error(f"❌ Error fetching data for {symbol}: {e}")
         return pd.DataFrame()
 
-# =============================
-#  Strategy 1 – Twin Candle Wick‑Body Balance
-# =============================
+# Strategy 1 – Twin Candle Wick‑Body Balance
 
 def _valid_strategy1_pair(c1: pd.Series, c2: pd.Series) -> bool:
     color1 = "green" if float(c1["close"]) > float(c1["open"]) else "red"
@@ -111,12 +122,18 @@ def detect_strategy1(df: pd.DataFrame):
     return matches
 
 # Send Telegram alert with optional chart
-def send_telegram_alert(message):
+
+def send_telegram_alert(message, image_path=None):
     if not enable_alerts:
         return
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": message})
+
+        if image_path:
+            with open(image_path, "rb") as img:
+                photo_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+                requests.post(photo_url, files={"photo": img}, data={"chat_id": TELEGRAM_CHAT_ID})
     except Exception as e:
         st.error(f"❌ Telegram Error: {e}")
 
@@ -131,7 +148,6 @@ def plot_chart(df, symbol, strategy_matches):
         name="Candles"
     )])
 
-    # Add annotations for strategy matches
     for idx, time1, time2 in strategy_matches:
         match_price = df.iloc[idx + 1]['close']
         fig.add_trace(go.Scatter(
@@ -147,6 +163,12 @@ def plot_chart(df, symbol, strategy_matches):
     fig.update_layout(title=f"{symbol} - 5m Candle Chart", xaxis_title="Time", yaxis_title="Price")
     st.plotly_chart(fig, use_container_width=True)
 
+    if strategy_matches:
+        image_path = f"{symbol.replace('/', '_')}_strategy1.png"
+        fig.write_image(image_path)
+        return image_path
+    return None
+
 # Run bot loop per refresh
 for symbol in symbols:
     with st.container():
@@ -158,16 +180,23 @@ for symbol in symbols:
             col1, col2 = st.columns([3, 2])
 
             with col1:
-                plot_chart(df, symbol, matches)
+                image_path = plot_chart(df, symbol, matches)
 
             with col2:
                 st.write(df.tail(5))
 
                 if matches:
                     st.success(f"✅ Strategy 1 Triggered at {matches[-1][2]}")
-                    send_telegram_alert(f"✅ Strategy 1 triggered for {symbol} at {matches[-1][2]}")
+                    send_telegram_alert(
+                        f"✅ Strategy 1 triggered for {symbol} at {matches[-1][2]}",
+                        image_path=image_path
+                    )
                 else:
                     st.info("ℹ️ No signal detected.")
 
 # Auto refresh every x seconds
-st.experimental_rerun() if st.session_state.get("last_refresh", 0) + refresh_rate < time.time() else st.session_state.update({"last_refresh": time.time()})
+if st.session_state.get("last_refresh", 0) + refresh_rate < time.time():
+    st.session_state.last_refresh = time.time()
+    st.experimental_rerun()
+else:
+    st.session_state.last_refresh = time.time()
