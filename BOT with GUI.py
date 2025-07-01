@@ -4,9 +4,9 @@ import yfinance as yf
 import streamlit as st
 import requests
 
-# ================================
-# 🔧 CONFIG
-# ================================
+# ============================
+# CONFIGURATION
+# ============================
 TELEGRAM_BOT_TOKEN = "7118083654:AAHnZ9AzA18kRp8FyHcdn8WjC98lrZpOEc8"
 TELEGRAM_CHAT_ID = "1714318497"
 INTERVAL = "5m"
@@ -22,42 +22,43 @@ SYMBOL_MAP = {
 st.set_page_config(page_title="Live Alert Bot", layout="wide")
 st.title("📈 Real-time Strategy 1 Alert Bot Dashboard")
 
-# ================================
-# ⏰ Market Hours Filter
-# ================================
+# ============================
+# CHECK IF MARKET IS OPEN
+# ============================
 def is_market_open(symbol: str):
     if "NIFTY" in symbol:
         now = pd.Timestamp.now(tz="Asia/Kolkata")
         return now.weekday() < 5 and now.time() >= pd.Timestamp("09:15").time() and now.time() <= pd.Timestamp("15:30").time()
-    return True
+    return True  # Crypto always open
 
-# ================================
-# 📦 Fetch OHLCV
-# ================================
+# ============================
+# FETCH OHLCV DATA
+# ============================
 def fetch_data(symbol: str) -> pd.DataFrame:
     try:
-        df = yf.download(symbol, period=LOOKBACK, interval=INTERVAL, progress=False)
-        if isinstance(df, tuple):
-            df = df[0]
-        if df is None or df.empty:
+        result = yf.download(symbol, period=LOOKBACK, interval=INTERVAL, progress=False)
+        # FIX: If result is tuple, take the first element
+        if isinstance(result, tuple):
+            result = result[0]
+        if result is None or result.empty:
             st.warning(f"⚠️ No data for {symbol}")
             return pd.DataFrame()
-        df.columns = [col.lower() for col in df.columns]
-        df.reset_index(inplace=True)
-        if "datetime" in df.columns:
-            df.rename(columns={"datetime": "time"}, inplace=True)
-        elif "date" in df.columns:
-            df.rename(columns={"date": "time"}, inplace=True)
+        result.columns = [str(col).lower() for col in result.columns]
+        result.reset_index(inplace=True)
+        if "datetime" in result.columns:
+            result.rename(columns={"datetime": "time"}, inplace=True)
+        elif "date" in result.columns:
+            result.rename(columns={"date": "time"}, inplace=True)
         else:
-            df.rename(columns={"index": "time"}, inplace=True)
-        return df[["time", "open", "high", "low", "close", "volume"]]
+            result.rename(columns={"index": "time"}, inplace=True)
+        return result[["time", "open", "high", "low", "close", "volume"]]
     except Exception as e:
         st.error(f"❌ Error fetching data for {symbol}: {e}")
         return pd.DataFrame()
 
-# ================================
-# 🧠 Strategy 1 Logic
-# ================================
+# ============================
+# STRATEGY 1 DETECTION
+# ============================
 def detect_strategy1(df: pd.DataFrame):
     def _balanced(candle):
         open_, close = candle["open"], candle["close"]
@@ -81,9 +82,9 @@ def detect_strategy1(df: pd.DataFrame):
             matches.append((c1["time"], c2["time"]))
     return matches
 
-# ================================
-# 📩 Telegram Alert
-# ================================
+# ============================
+# TELEGRAM ALERT
+# ============================
 def send_telegram_alert(msg: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"}
@@ -94,9 +95,9 @@ def send_telegram_alert(msg: str):
     except Exception as e:
         st.error(f"Telegram failed: {e}")
 
-# ================================
-# 🚀 Streamlit App
-# ================================
+# ============================
+# STREAMLIT DASHBOARD
+# ============================
 symbols = st.multiselect("Select Symbols", list(SYMBOL_MAP.keys()), default=list(SYMBOL_MAP.keys()))
 alerts_enabled = st.toggle("🔔 Alerts ON/OFF", value=True)
 run_check = st.button("Run Strategy Check Now")
