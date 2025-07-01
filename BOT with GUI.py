@@ -60,12 +60,18 @@ def fetch_data(symbol):
 
         df.reset_index(inplace=True)
         df.columns = [str(col).lower() for col in df.columns]
+
         if 'datetime' in df.columns:
             df.rename(columns={"datetime": "time"}, inplace=True)
         elif 'date' in df.columns:
             df.rename(columns={"date": "time"}, inplace=True)
         else:
             df.rename(columns={df.columns[0]: "time"}, inplace=True)
+
+        required_cols = ['open', 'high', 'low', 'close']
+        for col in required_cols:
+            if col not in df.columns:
+                raise ValueError(f"Missing required column: {col}")
 
         return df
     except Exception as e:
