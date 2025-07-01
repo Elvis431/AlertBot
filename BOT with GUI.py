@@ -4,6 +4,8 @@ import streamlit as st
 import time
 import plotly.graph_objects as go
 import requests
+import tempfile
+import os
 
 # Telegram configuration
 TELEGRAM_BOT_TOKEN = "7118083654:AAHnZ9AzA18kRp8FyHcdn8WjC98lrZpOEc8"
@@ -48,6 +50,18 @@ symbols = st.multiselect("Select Symbols to Monitor", st.session_state.custom_sy
 
 # Alert toggle
 enable_alerts = st.checkbox("Enable Telegram Alerts", value=True)
+
+# Countdown timer display
+if "refresh_timer" not in st.session_state:
+    st.session_state.refresh_timer = refresh_rate
+
+countdown_placeholder = st.empty()
+
+# Function to update countdown
+def countdown(seconds):
+    for remaining in range(seconds, 0, -1):
+        countdown_placeholder.markdown(f"⏳ **Refreshing in: {remaining} seconds**")
+        time.sleep(1)
 
 # Function to fetch data from yfinance
 def fetch_data(symbol):
@@ -123,12 +137,21 @@ def detect_strategy1(df: pd.DataFrame):
 
 # Send Telegram alert with optional chart
 
-def send_telegram_alert(message):
+def send_telegram_alert(message, chart_path=None):
     if not enable_alerts:
         return
     try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": message})
+        if chart_path and os.path.exists(chart_path):
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+            with open(chart_path, 'rb') as photo:
+                requests.post(url, data={
+                    "chat_id": TELEGRAM_CHAT_ID,
+                    "caption": message
+                }, files={"photo": photo})
+            os.remove(chart_path)
+        else:
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+            requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": message})
     except Exception as e:
         st.error(f"❌ Telegram Error: {e}")
 
@@ -158,6 +181,13 @@ def plot_chart(df, symbol, strategy_matches):
     fig.update_layout(title=f"{symbol} - 5m Candle Chart", xaxis_title="Time", yaxis_title="Price")
     st.plotly_chart(fig, use_container_width=True)
 
+    if strategy_matches:
+        temp_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        fig.write_image(temp_file.name, format="png", engine="kaleido")
+        return temp_file.name
+
+    return None
+
 # Run bot loop per refresh
 for symbol in symbols:
     with st.container():
@@ -169,7 +199,7 @@ for symbol in symbols:
             col1, col2 = st.columns([3, 2])
 
             with col1:
-                plot_chart(df, symbol, matches)
+                chart_path = plot_chart(df, symbol, matches)
 
             with col2:
                 st.write(df.tail(5))
@@ -177,16 +207,12 @@ for symbol in symbols:
                 if matches:
                     st.success(f"✅ Strategy 1 Triggered at {matches[-1][2]}")
                     send_telegram_alert(
-                        f"✅ Strategy 1 triggered for {symbol} at {matches[-1][2]}"
+                        f"✅ Strategy 1 triggered for {symbol} at {matches[-1][2]}", chart_path
                     )
                 else:
                     st.info("ℹ️ No signal detected.")
 
-# Auto refresh every x seconds using `add_script_run_ctx` instead of experimental rerun workaround
-current_time = time.time()
-last_refresh = st.session_state.get("last_refresh", 0)
-
-if current_time - last_refresh > refresh_rate:
-    st.session_state.last_refresh = current_time
-    st.button("Refresh Now", on_click=lambda: st.session_state.update({"last_refresh": time.time()}))
-    st.experimental_set_query_params(refresh=str(current_time))
+# Countdown and auto-refresh
+countdown(refresh_rate)
+st.session_state.refresh_timer = refresh_rate
+st.rerun()
