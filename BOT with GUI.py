@@ -118,22 +118,17 @@ def detect_strategy1(df: pd.DataFrame):
     matches = []
     for i in range(len(df) - 1):
         if _valid_strategy1_pair(df.iloc[i], df.iloc[i + 1]):
-            matches.append((i, df.iloc[i]["time"], df.iloc[i + 1]["time"]))
+            matches.append((i, str(df.iloc[i]["time"]), str(df.iloc[i + 1]["time"])))
     return matches
 
 # Send Telegram alert with optional chart
 
-def send_telegram_alert(message, image_path=None):
+def send_telegram_alert(message):
     if not enable_alerts:
         return
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": message})
-
-        if image_path:
-            with open(image_path, "rb") as img:
-                photo_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
-                requests.post(photo_url, files={"photo": img}, data={"chat_id": TELEGRAM_CHAT_ID})
     except Exception as e:
         st.error(f"❌ Telegram Error: {e}")
 
@@ -163,12 +158,6 @@ def plot_chart(df, symbol, strategy_matches):
     fig.update_layout(title=f"{symbol} - 5m Candle Chart", xaxis_title="Time", yaxis_title="Price")
     st.plotly_chart(fig, use_container_width=True)
 
-    if strategy_matches:
-        image_path = f"{symbol.replace('/', '_')}_strategy1.png"
-        fig.write_image(image_path)
-        return image_path
-    return None
-
 # Run bot loop per refresh
 for symbol in symbols:
     with st.container():
@@ -180,7 +169,7 @@ for symbol in symbols:
             col1, col2 = st.columns([3, 2])
 
             with col1:
-                image_path = plot_chart(df, symbol, matches)
+                plot_chart(df, symbol, matches)
 
             with col2:
                 st.write(df.tail(5))
@@ -188,8 +177,7 @@ for symbol in symbols:
                 if matches:
                     st.success(f"✅ Strategy 1 Triggered at {matches[-1][2]}")
                     send_telegram_alert(
-                        f"✅ Strategy 1 triggered for {symbol} at {matches[-1][2]}",
-                        image_path=image_path
+                        f"✅ Strategy 1 triggered for {symbol} at {matches[-1][2]}"
                     )
                 else:
                     st.info("ℹ️ No signal detected.")
